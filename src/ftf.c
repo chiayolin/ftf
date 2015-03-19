@@ -6,7 +6,11 @@
 
 #define MAXLEN 1024
 #define IS_NUL 1
-#define NO_NUL 0
+
+struct _ftf {
+	int p_len, k_len,
+	    k_pos, k_cur;
+};
 
 void encrypt(char *plaintext, char *key);
 void decrypt(char *ciphertext, char *key);
@@ -64,8 +68,9 @@ int scan(char *array, const char *tokens[]) {
 
 bool get_key(char *usr_in) {
 	fprintf(stdout, "key: ");
-
+	
 	static struct termios old, new; 
+	
 	tcgetattr(0, &old);
 	new = old;
 	new.c_lflag &= ~ICANON;
@@ -82,31 +87,33 @@ bool get_key(char *usr_in) {
 	tcsetattr(0, TCSANOW, &old);
 	fprintf(stdout, "\n");
 	
-	return i != 0 ? NO_NUL : IS_NUL;
+	return i != 0 ? !IS_NUL : IS_NUL;
 }
 
 void encrypt(char *input, char *key) {
-	int p_len = strlen(input),
-	    k_len = strlen(key),
-	    k_position, k_current, i;
+	struct _ftf en;
+	en.p_len = strlen(input);
+	en.k_len = strlen(key);
 	
-	for(k_position = 0; k_position < k_len; k_position++) {
-		k_current = key[k_position];
-		for(i = 0; i < p_len; i++)
-			input[i] = (((input[i] - 32) + (3 * k_current++)) % 94) + 32;
+	int i;
+	for(en.k_pos = 0; en.k_pos < en.k_len; en.k_pos++) {
+		en.k_cur = key[en.k_pos];
+		for(i = 0; i < en.p_len; i++)
+			input[i] = (((input[i] - 32) + (3 * en.k_cur++)) % 94) + 32;
 	}
 	input[i] = '\0';
 }
 
 void decrypt(char *input, char *key) {
-	int p_len = strlen(input),
-	    k_len = strlen(key),
-	    k_position, k_current, i;
+	struct _ftf de;
+	de.p_len = strlen(input);
+	de.k_len = strlen(key);
 	
-	for(k_position = k_len - 1; k_position >= 0; k_position--) {
-		k_current = key[k_position];
-		for(i = 0; i < p_len; i++) {
-			input[i] = (((input[i] - 32) - (3 * k_current++)) % 94) + 32;
+	int i;
+	for(de.k_pos = de.k_len - 1; de.k_pos >= 0; de.k_pos--) {
+		de.k_cur = key[de.k_pos];
+		for(i = 0; i < de.p_len; i++) {
+			input[i] = (((input[i] - 32) - (3 * de.k_cur++)) % 94) + 32;
 			
 			// add 94 to avoid unprintable char(s);
 			if(input[i] < 32) input[i] = input[i] + 94;
