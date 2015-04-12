@@ -1,10 +1,13 @@
+#include <time.h>
 #include <stdio.h>
+#include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
 #include <termios.h>
 
 #define MAXLEN 1024
+#define BUFFNS 16
 #define IS_NUL 1
 
 struct _ftf {
@@ -12,51 +15,15 @@ struct _ftf {
 	    k_pos, k_cur;
 };
 
-void encrypt(char *plaintext, char *key);
-void decrypt(char *ciphertext, char *key);
-bool get_key(char *usr_in);
+int ftf_encrypt(char *_plaintext, char *_ciphertext, char *key);
+void _ftf_encrypt(FILE *buffer, FILE *output, char *key);
+int ftf_decrypt(char *_ciphertext, char *_plaintext, char *key);
+void _ftf_decrypt(FILE *buffer, FILE *output, char *key);
+
 int scan(char *array, const char *tokens[]);
-
-int main(int argc, char *argv[]) {
-	/* exit if is missing arg(s) */
-	if(argc < 3) {
-		fprintf(stderr, 
-			"error: missing arg(s)\n");
-		return EXIT_FAILURE;
-	}
-	
-	/* commands patched table */
-	enum {
-		DECRYPT = 0, D, ENCRYPT, E, ERROR };
-	const char *args[] = {
-		"decrypt", "-d", "encrypt", "-e", "\0" };
-	bool e_flag = false;
-
-	switch(scan(argv[1], args)) {
-	case DECRYPT: case D:
-		e_flag = DECRYPT;
-		break;
-	case ENCRYPT: case E:
-		e_flag = ENCRYPT;
-		break;
-	default:
-		fprintf(stderr, 
-			"error: '%s' isn't an option\n", argv[1]);
-		return EXIT_FAILURE;
-	}
-	
-	char key[MAXLEN];
-	bool null_key = get_key(key);
-	if(null_key) { 
-		fprintf(stderr, "error: null key\n");
-		return EXIT_FAILURE;
-	}
-	
-	(e_flag) ? encrypt(argv[2], key) : decrypt(argv[2], key);
-	fprintf(stdout, "\n%s\n", argv[2]);
-
-	return EXIT_SUCCESS;
-}
+void cpyfile(FILE *input, FILE *output);
+char *buff_name(size_t size);
+bool get_key(char *usr_in);
 
 int scan(char *array, const char *tokens[]) {
 	int index = 0;
@@ -64,6 +31,36 @@ int scan(char *array, const char *tokens[]) {
 		&& !(strcmp(tokens[index], "\0") == 0))
 			++index;
 	return index;
+}
+
+void cpyfile(FILE *input, FILE *output) {
+	int ch = 0;
+	rewind(input);
+	rewind(output);
+
+	while((ch = fgetc(input)) != EOF)
+		fputc(ch, output);
+}
+
+char *buff_name(size_t size) {
+	static char charset[] = 
+		"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+	char *_buff_name = malloc(sizeof(char) * (size + 1));
+	
+	if(_buff_name) {
+		int i, key;
+		
+		srand(time(NULL));
+
+		_buff_name[0] = '.';
+		for (i = 1; i < size; i++) {
+			key = rand() % (int)(sizeof(charset) - 1);
+			_buff_name[i] = charset[key];
+		}
+		_buff_name[size] = '\0';
+	}
+
+	return _buff_name;
 }
 
 bool get_key(char *usr_in) {
@@ -90,35 +87,190 @@ bool get_key(char *usr_in) {
 	return i != 0 ? !IS_NUL : IS_NUL;
 }
 
-void encrypt(char *input, char *key) {
-	struct _ftf en;
-	en.p_len = strlen(input);
-	en.k_len = strlen(key);
+int ftf_encrypt(char *_plaintext, char *_ciphertext, char *key) {
+	/* generate a random buffer name with a size of BUFFNS */
+	char *_buffer = buff_name(BUFFNS);
+	fprintf(stdout, "%s\n", _buffer);
+	FILE *plaintext = fopen(_plaintext, "r"); /* open plaintext */
+	FILE *buffer = fopen(_buffer, "w+"); /* open buffer file */
 	
-	int i;
-	for(en.k_pos = 0; en.k_pos < en.k_len; en.k_pos++) {
-		en.k_cur = key[en.k_pos];
-		for(i = 0; i < en.p_len; i++)
-			input[i] = (((input[i] - 32) + (3 * en.k_cur++)) % 94) + 32;
-	}
-	input[i] = '\0';
+	/* null checks */
+	if(plaintext == NULL || buffer == NULL)
+		 return EXIT_FAILURE;
+	
+	cpyfile(plaintext, buffer);  /* clone plaintext to buffer */
+	fclose(plaintext); /* close plaintext */
+	FILE *ciphertext = fopen(_ciphertext, "w+"); /* open ciphertext */ 
+	_ftf_encrypt(plaintext, ciphertext, key); /* sexy encryption */
+	unlink(_buffer); /* delete buffer */
+
+	return EXIT_SUCCESS;
 }
 
-void decrypt(char *input, char *key) {
-	struct _ftf de;
-	de.p_len = strlen(input);
-	de.k_len = strlen(key);
+void _ftf_encrypt(FILE *buffer, FILE *output, char *key) {
+	struct _ftf en;
+	en.k_len = strlen(key); /* get key length */
 	
-	int i;
-	for(de.k_pos = de.k_len - 1; de.k_pos >= 0; de.k_pos--) {
-		de.k_cur = key[de.k_pos];
-		for(i = 0; i < de.p_len; i++) {
-			input[i] = (((input[i] - 32) - (3 * de.k_cur++)) % 94) + 32;
-			
-			// add 94 to avoid unprintable char(s);
-			if(input[i] < 32) input[i] = input[i] + 94;
+	for(en.k_pos = 0; en.k_pos < en.k_len; en.k_pos++) {
+		en.k_cur = key[en.k_pos]; /* set current key */
+		
+		/* reset buffer and output */
+		rewind(buffer);
+		rewind(output);
+		
+		/* start encrypting */
+		int ch = 0;
+		while((ch = fgetc(buffer)) != EOF) {
+			/* keep control char(s) */
+			if(ch < 32) { 
+				fputc(ch, output);
+				continue;
+			}
+
+			ch = (((ch - 32) + (3 * en.k_cur++)) % 94) + 32;
+			fputc(ch, output);
 		}
 	}
-	input[i] = '\0';
+	
+	/* add a new line in the end of output file */
+	fseek(output, -1, SEEK_END);
+	fputc('\n', output);
+	
+	/* close input and buffer file */
+	fclose(buffer);
+	fclose(output);
+}
+
+int ftf_decrypt(char *_ciphertext, char *_plaintext, char *key) {
+	/* generate a random buffer name with a size of BUFFNS */
+	char *_buffer = buff_name(BUFFNS);
+	fprintf(stdout, "%s\n", _buffer);
+	FILE *ciphertext = fopen(_ciphertext, "r"); /* open ciphertext */
+	FILE *buffer = fopen(_buffer, "w+"); /* open buffer file */
+	
+	/* null checks */
+	if(ciphertext == NULL || buffer == NULL)
+		 return EXIT_FAILURE;
+	
+	cpyfile(ciphertext, buffer);  /* clone ciphertext to buffer */
+	fclose(ciphertext); /* close ciphertext */
+	FILE *plaintext = fopen(_plaintext, "w+"); /* open plaintext */ 
+	_ftf_decrypt(ciphertext, plaintext, key); /* sexy decryption */
+	unlink(_buffer); /* delete buffer */
+
+	return EXIT_SUCCESS;
+}
+
+void _ftf_decrypt(FILE *buffer, FILE *output, char *key) {
+	struct _ftf de;
+	de.k_len = strlen(key); /* get key length */ 
+
+	/* read init. factors reversely */
+	for(de.k_pos = de.k_len - 1; de.k_pos >= 0; de.k_pos--) {
+		de.k_cur = key[de.k_pos]; /* set current key */
+		
+		/* reset *ofp and *bfp */
+		rewind(output);
+		rewind(buffer);
+		
+		/* start encrypting */
+		int ch, _ch;
+		ch = _ch = 0;
+		while((ch = fgetc(buffer)) != EOF) {
+			if(ch < 32) {
+				fputc(ch, output);
+				continue; /* skips control char(s) */
+			}
+
+			_ch = (((ch - 32) - (3 * de.k_cur++)) % 94) + 32;
+			_ch = (_ch < 32) ? _ch + 94 : _ch;
+			fputc(_ch, output);
+		}
+	}
+	
+	/* add a new line in the end of output file */
+	// fseek(ofp, 0, SEEK_END);
+	// fputc('\n', ofp);
+	
+	/* close input and buffer file */
+	fclose(buffer);
+	fclose(output);
+}
+
+int main(int argc, char *argv[]) {
+	/* exit if is missing arg(s) */
+	if(argc < 3) {
+		fprintf(stderr, 
+			"error: missing arg(s)\n");
+		return EXIT_FAILURE;
+	}
+	
+	/* commands patched table */
+	enum {
+		DECRYPT = 0, D, ENCRYPT, E, ERROR };
+	const char *args[] = {
+		"--decrypt", "-d", "--encrypt", "-e", "\0" };
+
+	int i = 0, counter = 0;
+	char *in_f_path = NULL;
+	bool e_flag = false;
+	
+	while(argv[++i] != NULL) {
+		printf("argv[%d]= %s\n", i, argv[i]);
+		printf("scan = %d\n", scan(argv[i], args));
+		switch(scan(argv[i], args)) {
+		case DECRYPT: case D: {
+			e_flag = false;
+			counter++;
+			i++; /* skip one argument */
+			
+			if(argv[i] == NULL)
+				fprintf(stderr, "error: missing arg(s)\n");
+			in_f_path = argv[i];
+			break;
+		}
+		case ENCRYPT: case E: {
+			e_flag = true;
+			counter++;
+			i++; /* skip one argument */
+			
+			if(argv[i] == NULL)
+				fprintf(stderr, "error: missing arg(s)\n");
+			in_f_path = argv[i];
+			break;
+		}
+		default: {
+			fprintf(stderr, 
+				"error: '%s' isn't an option\n", argv[1]);
+			return EXIT_FAILURE;
+		}
+		}
+
+		if(counter > 1) {
+			fprintf(stderr, "error: too many arg(s)\n");
+			return EXIT_FAILURE;
+		}
+	}
+
+	char key[MAXLEN];
+	bool null_key = get_key(key);
+	if(null_key) { 
+		fprintf(stderr, "error: null key\n");
+		return EXIT_FAILURE;
+	}
+	
+	static char extention[] = ".ftf";
+	size_t size1 = strlen(in_f_path);
+	size_t size2 = strlen(extention);
+	char *out_f_path = malloc(size1 + size2);
+	memcpy(out_f_path, in_f_path, size1);
+	memcpy(out_f_path + size1, extention, size2);	
+	
+	printf("in = %s\n", in_f_path);
+
+	(e_flag) ? ftf_encrypt(in_f_path, out_f_path, key) : 
+		ftf_decrypt(in_f_path, out_f_path, key);
+
+	return EXIT_SUCCESS;
 }
 
