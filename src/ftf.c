@@ -6,6 +6,8 @@
 #include <stdbool.h>
 #include <termios.h>
 
+#define ENCRYPTION 1
+#define DECRYPTION 0
 #define MAXLEN 1024
 #define BUFFNS 16
 #define IS_NUL 1
@@ -22,6 +24,7 @@ void _ftf_decrypt(FILE *buffer, FILE *output, char *key);
 
 int scan(char *array, const char *tokens[]);
 void cpyfile(FILE *input, FILE *output);
+char *gen_path(char *in, int mode);
 char *buff_name(size_t size);
 bool get_key(char *usr_in);
 
@@ -38,8 +41,9 @@ void cpyfile(FILE *input, FILE *output) {
 	rewind(input);
 	rewind(output);
 
-	while((ch = fgetc(input)) != EOF)
+	while((ch = fgetc(input)) != EOF) {
 		fputc(ch, output);
+	}
 }
 
 char *buff_name(size_t size) {
@@ -90,7 +94,7 @@ bool get_key(char *usr_in) {
 int ftf_encrypt(char *_plaintext, char *_ciphertext, char *key) {
 	/* generate a random buffer name with a size of BUFFNS */
 	char *_buffer = buff_name(BUFFNS);
-	fprintf(stdout, "%s\n", _buffer);
+	//fprintf(stdout, "%s\n", _buffer);
 	FILE *plaintext = fopen(_plaintext, "r"); /* open plaintext */
 	FILE *buffer = fopen(_buffer, "w+"); /* open buffer file */
 	
@@ -101,7 +105,7 @@ int ftf_encrypt(char *_plaintext, char *_ciphertext, char *key) {
 	cpyfile(plaintext, buffer);  /* clone plaintext to buffer */
 	fclose(plaintext); /* close plaintext */
 	FILE *ciphertext = fopen(_ciphertext, "w+"); /* open ciphertext */ 
-	_ftf_encrypt(plaintext, ciphertext, key); /* sexy encryption */
+	_ftf_encrypt(buffer, ciphertext, key); /* sexy encryption */
 	unlink(_buffer); /* delete buffer */
 
 	return EXIT_SUCCESS;
@@ -110,10 +114,9 @@ int ftf_encrypt(char *_plaintext, char *_ciphertext, char *key) {
 void _ftf_encrypt(FILE *buffer, FILE *output, char *key) {
 	struct _ftf en;
 	en.k_len = strlen(key); /* get key length */
-	
+	puts("_ftf_encrypt");
 	for(en.k_pos = 0; en.k_pos < en.k_len; en.k_pos++) {
 		en.k_cur = key[en.k_pos]; /* set current key */
-		
 		/* reset buffer and output */
 		rewind(buffer);
 		rewind(output);
@@ -126,7 +129,6 @@ void _ftf_encrypt(FILE *buffer, FILE *output, char *key) {
 				fputc(ch, output);
 				continue;
 			}
-
 			ch = (((ch - 32) + (3 * en.k_cur++)) % 94) + 32;
 			fputc(ch, output);
 		}
@@ -135,10 +137,6 @@ void _ftf_encrypt(FILE *buffer, FILE *output, char *key) {
 	/* add a new line in the end of output file */
 	fseek(output, -1, SEEK_END);
 	fputc('\n', output);
-	
-	/* close input and buffer file */
-	fclose(buffer);
-	fclose(output);
 }
 
 int ftf_decrypt(char *_ciphertext, char *_plaintext, char *key) {
@@ -155,7 +153,12 @@ int ftf_decrypt(char *_ciphertext, char *_plaintext, char *key) {
 	cpyfile(ciphertext, buffer);  /* clone ciphertext to buffer */
 	fclose(ciphertext); /* close ciphertext */
 	FILE *plaintext = fopen(_plaintext, "w+"); /* open plaintext */ 
-	_ftf_decrypt(ciphertext, plaintext, key); /* sexy decryption */
+	_ftf_decrypt(buffer, plaintext, key); /* sexy decryption */
+	
+	/* close input and buffer file */
+	fclose(buffer);
+	fclose(plaintext);
+	
 	unlink(_buffer); /* delete buffer */
 
 	return EXIT_SUCCESS;
@@ -163,7 +166,8 @@ int ftf_decrypt(char *_ciphertext, char *_plaintext, char *key) {
 
 void _ftf_decrypt(FILE *buffer, FILE *output, char *key) {
 	struct _ftf de;
-	de.k_len = strlen(key); /* get key length */ 
+	de.k_len = strlen(key); /* get key length */
+       	printf("key= %d\n", de.k_len);
 
 	/* read init. factors reversely */
 	for(de.k_pos = de.k_len - 1; de.k_pos >= 0; de.k_pos--) {
@@ -172,7 +176,8 @@ void _ftf_decrypt(FILE *buffer, FILE *output, char *key) {
 		/* reset *ofp and *bfp */
 		rewind(output);
 		rewind(buffer);
-		
+		puts("+");
+
 		/* start encrypting */
 		int ch, _ch;
 		ch = _ch = 0;
@@ -184,17 +189,10 @@ void _ftf_decrypt(FILE *buffer, FILE *output, char *key) {
 
 			_ch = (((ch - 32) - (3 * de.k_cur++)) % 94) + 32;
 			_ch = (_ch < 32) ? _ch + 94 : _ch;
+			printf("_ch= %c\n", _ch);
 			fputc(_ch, output);
 		}
 	}
-	
-	/* add a new line in the end of output file */
-	// fseek(ofp, 0, SEEK_END);
-	// fputc('\n', ofp);
-	
-	/* close input and buffer file */
-	fclose(buffer);
-	fclose(output);
 }
 
 int main(int argc, char *argv[]) {
@@ -259,18 +257,43 @@ int main(int argc, char *argv[]) {
 		return EXIT_FAILURE;
 	}
 	
-	static char extention[] = ".ftf";
-	size_t size1 = strlen(in_f_path);
-	size_t size2 = strlen(extention);
-	char *out_f_path = malloc(size1 + size2);
-	memcpy(out_f_path, in_f_path, size1);
-	memcpy(out_f_path + size1, extention, size2);	
-	
-	printf("in = %s\n", in_f_path);
-
+	char *out_f_path = gen_path(in_f_path, e_flag);
+	printf("out_f_path= %s\n", out_f_path);
 	(e_flag) ? ftf_encrypt(in_f_path, out_f_path, key) : 
 		ftf_decrypt(in_f_path, out_f_path, key);
 
 	return EXIT_SUCCESS;
+}
+
+char *gen_path(char *in, int mode) {
+	static char extention[] = ".ftf";
+	size_t size2 = strlen(extention);
+	size_t size1 = strlen(in);
+	char *out;
+	
+	/* error checks and allocate array */
+	if((in == NULL) || ((out = malloc(size1 + size2))) == NULL)
+		return NULL;
+	memcpy(out, in, size1);
+
+	switch(mode) {
+	case ENCRYPTION: {
+		memcpy(out + size1, extention, size2);	
+		break;
+	}
+	case DECRYPTION: {
+		puts("decryption gen_path");
+		char *last_dot = strrchr(out, '.');
+		*last_dot = '\0';
+		printf("last_dot= %s\n", out);
+		break;
+	}
+	default: {
+		return NULL;
+		break;
+	}
+	}
+
+	return out;
 }
 
