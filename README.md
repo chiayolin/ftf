@@ -5,7 +5,7 @@ FTF Cryptographic Algorithm C Implementation
 
 ## Notice
 
-This project is currently *discontinued* due to I don't feel like writting any code. However, I will be working on this project during this summer (2015).
+This project is currently *discontinued* due to I don't feel like writting any code; however, I'll be working this project when I have time.
 
 ## Stuffs To Do
 
